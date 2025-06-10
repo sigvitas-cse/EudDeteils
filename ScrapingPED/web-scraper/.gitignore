@@ -1,0 +1,21 @@
+# Node
+node_modules/
+.env
+*.log
+
+# Build
+dist/
+build/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Debug folders
+web-scraper/debug/
+**/debug/
+
+
+# Excel/CSV if not needed
+*.csv
+*.xlsx
