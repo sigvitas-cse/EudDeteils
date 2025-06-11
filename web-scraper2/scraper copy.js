@@ -6,9 +6,9 @@ async function trySearchName(page, name) {
   let educationText = 'NA';
   const nameParts = name.split(' ').filter(part => part);
   const searchAttempts = [
-    name,
-    nameParts.length >= 2 ? nameParts.slice(0, 2).join(' ') : null,
-    nameParts[0]
+    name, // Full name: "x y z"
+    nameParts.length >= 2 ? nameParts.slice(0, 2).join(' ') : null, // First two: "x y"
+    nameParts[0] // First: "x"
   ].filter(Boolean);
 
   for (const searchTerm of searchAttempts) {
@@ -30,21 +30,49 @@ async function trySearchName(page, name) {
       continue;
     }
 
-    console.log('Locating profile link...');
+    console.log('Locating profile link/image...');
     let linkClicked = false;
     for (const selector of config.PROFILE_LINK_SELECTORS) {
       try {
         await page.waitForSelector(selector, { timeout: 15000 });
         const elements = await page.$$(selector);
+        console.log(`Found ${elements.length} elements for selector "${selector}"`);
+
+        // Special case: If only one image is found for this search term, click it directly
+        if (elements.length === 1 && searchTerm !== name) { // Only for "x y" or "x", not full name
+          await elements[0].click();
+          console.log(`Clicked single profile image: ${selector}`);
+          linkClicked = true;
+          break;
+        }
+
+        // For multiple results or full name search, verify name in h3
         for (const element of elements) {
           const href = await element.evaluate(el => el.getAttribute('href') || '');
-          const text = await element.evaluate(el => el.innerText);
-          const normalizedName = name.toLowerCase().replace(/\s/g, '-');
-          if (text.includes(name) || href.includes(normalizedName) || href.includes(searchTerm.toLowerCase().replace(/\s/g, '-'))) {
+          const parentId = await element.evaluate(el => {
+            const parent = el.closest('[id^="people-"]');
+            return parent ? parent.id : null;
+          });
+
+          if (!parentId) continue;
+
+          const h3Selector = `#${parentId} > div > h3`;
+          const h3Text = await page.evaluate(sel => {
+            const element = document.querySelector(sel);
+            return element ? element.innerText.toLowerCase() : '';
+          }, h3Selector);
+
+          const firstTwoNameParts = nameParts.length >= 2 ? nameParts.slice(0, 2).map(part => part.toLowerCase()) : [nameParts[0].toLowerCase()];
+          const h3Words = h3Text.split(' ').filter(word => word);
+          const nameMatch = firstTwoNameParts.every(part => h3Words.some(word => word.includes(part)));
+
+          if (nameMatch) {
             await element.click();
-            console.log(`Clicked profile: ${selector} (href: ${href})`);
+            console.log(`Clicked profile image: ${selector} (href: ${href}, h3: ${h3Text})`);
             linkClicked = true;
             break;
+          } else {
+            console.log(`No name match for "${searchTerm}" in h3: ${h3Text}`);
           }
         }
         if (linkClicked) break;
@@ -54,7 +82,7 @@ async function trySearchName(page, name) {
     }
 
     if (!linkClicked) {
-      console.log(`No profile link found for "${searchTerm}"`);
+      console.log(`No profile link/image found for "${searchTerm}"`);
       const html = await page.content();
       await saveDebugFiles(name, searchTerm, html, page);
       continue;
@@ -68,10 +96,10 @@ async function trySearchName(page, name) {
       await page.waitForSelector(config.EDUCATION_SELECTOR, { timeout: 15000 });
       educationText = await page.evaluate(selector => {
         const element = document.querySelector(selector);
-        return element ? element.innerText : 'NA';
+        return element ? element.innerText : ',NA';
       }, config.EDUCATION_SELECTOR);
 
-       // Clean the education text to remove "Education" header
+      // Clean the education text to remove "Education" header
       if (educationText !== 'NA') {
         educationText = educationText
           .split('\n')
@@ -80,7 +108,7 @@ async function trySearchName(page, name) {
           .trim();
         if (!educationText) educationText = 'NA'; // Fallback if all lines are filtered out
       }
-      
+
       console.log(`Education text for "${searchTerm}": ${educationText}`);
       return educationText;
     } catch (err) {
@@ -94,7 +122,7 @@ async function trySearchName(page, name) {
 
 async function scrapeEducation() {
   const mongoose = require('mongoose');
-  const { Name, Education } = require('./DB/schemas');
+  const { Name, Education } = require('./DB/schemas'); // Corrected to match your directory
   const { ensureDebugFolder } = require('./utils/utils');
 
   let browser;
@@ -106,8 +134,21 @@ async function scrapeEducation() {
 
     await ensureDebugFolder(config.DEBUG_PATH);
     await mongoose.connect(config.MONGODB_URI);
-    const names = await Name.find({});
-    console.log(`Found ${names.length} names in "names" collection`);
+
+    // Get all names and processed names
+    const names = await Name.find({}).sort({ name: 1 }); // Sort to ensure consistent order
+    const processedNames = await Education.find({}, 'name').lean();
+    const processedNameSet = new Set(processedNames.map(doc => doc.name));
+    const unprocessedNames = names.filter(nameDoc => !processedNameSet.has(nameDoc.name));
+    
+    console.log(`Found ${names.length} names in "names2" collection`);
+    console.log(`Found ${processedNames.length} processed names in "education" collection`);
+    console.log(`Processing ${unprocessedNames.length} unprocessed names`);
+
+    if (unprocessedNames.length === 0) {
+      console.log('All names have been processed. Exiting.');
+      return;
+    }
 
     console.log('Launching browser...');
     browser = await puppeteer.launch({
@@ -116,9 +157,9 @@ async function scrapeEducation() {
       defaultViewport: null
     });
 
-    for (let i = 0; i < names.length; i += config.BATCH_SIZE) {
-      const batch = names.slice(i, i + config.BATCH_SIZE);
-      console.log(`Processing batch ${i / config.BATCH_SIZE + 1} of ${Math.ceil(names.length / config.BATCH_SIZE)}`);
+    for (let i = 0; i < unprocessedNames.length; i += config.BATCH_SIZE) {
+      const batch = unprocessedNames.slice(i, i + config.BATCH_SIZE);
+      console.log(`Processing batch ${i / config.BATCH_SIZE + 1} of ${Math.ceil(unprocessedNames.length / config.BATCH_SIZE)}`);
 
       for (const { name } of batch) {
         console.log(`Scraping education for ${name}...`);

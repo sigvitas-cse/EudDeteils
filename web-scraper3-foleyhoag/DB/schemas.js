@@ -22,6 +22,6 @@ const educationSchema = new mongoose.Schema({
 });
 
 module.exports = {
-  Name: mongoose.model('Name', nameSchema, 'names2'),
-  Education: mongoose.model('Education', educationSchema, 'education2')
+  Name: mongoose.model('Name', nameSchema, 'namesfoleyhoag'),
+  Education: mongoose.model('Education', educationSchema, 'foleyhoag')
 };

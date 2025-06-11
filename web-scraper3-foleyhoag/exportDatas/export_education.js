@@ -15,7 +15,7 @@ const educationSchema = new mongoose.Schema({
   }
 });
 
-const Education = mongoose.model('Education', educationSchema, 'education2');
+const Education = mongoose.model('Education', educationSchema, 'foleyhoag');
 
 async function exportEducationToExcel() {
   const uri = process.env.MONGODB_URI || 'mongodb+srv://darshanbr36:tgnHO951d3j9ZEy1@cluster0.wuehq.mongodb.net/Scraping?retryWrites=true&w=majority&appName=cluster0';
@@ -26,11 +26,11 @@ async function exportEducationToExcel() {
 
   try {
     await mongoose.connect(uri);
-    console.log('Fetching data from education2 collection...');
+    console.log('Fetching data from education collection...');
     const records = await Education.find({}).lean();
 
     if (records.length === 0) {
-      console.log('No data found in education2 collection.');
+      console.log('No data found in education collection.');
       return;
     }
 
